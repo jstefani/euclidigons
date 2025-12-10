@@ -28,6 +28,7 @@
 engine.name = 'PrimitiveString'
 num_voices = 19
 musicutil = require 'musicutil'
+tab = require 'tabutil'
 
 Voice = require 'voice'
 voice_manager = Voice.new(num_voices, Voice.MODE_LRU)
@@ -441,7 +442,90 @@ function init()
 		end
 	}
 
+	-- save shapes data when PSET is saved
+	params.action_write = function(filename, name, number)
+		local shapes_data = {}
+		for s = 1, #shapes do
+			local shape = shapes[s]
+			table.insert(shapes_data, {
+				note = shape.note,
+				n = shape.n,
+				r = shape.r,
+				x = shape.x,
+				rate = shape.rate,
+				theta = shape.theta,
+				mute = shape.mute,
+				output_mode = shape.output_mode,
+				midi_device = shape.midi_device,
+				midi_channel = shape.midi_channel
+			})
+		end
+		-- save which shape is selected
+		local edit_index = nil
+		if edit_shape ~= nil then
+			for s = 1, #shapes do
+				if shapes[s] == edit_shape then
+					edit_index = s
+					break
+				end
+			end
+		end
+		local data = {
+			shapes = shapes_data,
+			edit_index = edit_index
+		}
+		tab.save(data, norns.state.data .. "shapes-" .. number .. ".data")
+	end
+
+	-- restore shapes data when PSET is loaded
+	params.action_read = function(filename, silent, number)
+		local shapes_file = norns.state.data .. "shapes-" .. number .. ".data"
+		if util.file_exists(shapes_file) then
+			local data = tab.load(shapes_file)
+			if data and data.shapes then
+				-- clear existing shapes
+				for s = 1, #shapes do
+					local shape = shapes[s]
+					-- release all voices for this shape
+					for v, voice in ipairs(shape.voices) do
+						voice:release()
+					end
+				end
+				shapes = {}
+				edit_shape = nil
+
+				-- restore shapes from saved data
+				for s = 1, #data.shapes do
+					local saved = data.shapes[s]
+					local shape = Shape.new(saved.note, saved.n, saved.r, saved.x, saved.rate)
+					shape.theta = saved.theta
+					shape.mute = saved.mute
+					shape.output_mode = saved.output_mode
+					shape.midi_device = saved.midi_device
+					shape.midi_channel = saved.midi_channel
+					table.insert(shapes, shape)
+				end
+
+				-- restore selected shape
+				if data.edit_index and shapes[data.edit_index] then
+					edit_shape = shapes[data.edit_index]
+				elseif #shapes > 0 then
+					edit_shape = shapes[1]
+				end
+			end
+		end
+	end
+
+	-- delete shapes data when PSET is deleted
+	params.action_delete = function(filename, name, number)
+		local shapes_file = norns.state.data .. "shapes-" .. number .. ".data"
+		if util.file_exists(shapes_file) then
+			os.remove(shapes_file)
+		end
+	end
+
 	params:bang()
+	params:default()
 
 	clock.run(function()
 		while true do
